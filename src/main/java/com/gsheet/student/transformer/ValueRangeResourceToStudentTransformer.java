@@ -1,14 +1,11 @@
 package com.gsheet.student.transformer;
 
-import com.gsheet.student.dto.StudentDto;
 import com.gsheet.student.entity.Student;
-import org.springframework.stereotype.Service;
 
 import java.util.List;
 
-@Service
 public class ValueRangeResourceToStudentTransformer {
-    public Student transform(int id, List<String> values) {
+    public static Student transform(int id, List<String> values) {
         String firstName = null;
         String middleName = null;
         String lastName = null;

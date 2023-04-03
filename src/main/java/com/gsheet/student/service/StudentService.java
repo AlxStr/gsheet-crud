@@ -4,52 +4,43 @@ import com.gsheet.student.dto.StudentDto;
 import com.gsheet.student.dto.google.ValueRangeUpdateDto;
 import com.gsheet.student.entity.Student;
 import com.gsheet.student.exception.StudentNotFoundException;
-import com.gsheet.student.repository.GoogleSheetRepository;
 import com.gsheet.student.resource.ValueRangeResource;
 import com.gsheet.student.transformer.ValueRangeResourceToStudentTransformer;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 @Service
 @RequiredArgsConstructor
 public class StudentService {
 
-    @Autowired
-    private final GoogleSheetRepository sheetRepository;
+    private final GoogleSheetService googleSheetService;
 
-    @Autowired
-    private ValueRangeResourceToStudentTransformer sheetValueRangeDtoToStudentDtoTransformer;
+    @Qualifier("studentPersistenceRangeProvider")
+    private final GoogleSheetsRangeProvider studentSheetsRangeProvider;
 
     public List<Student> getStudents() {
-        ValueRangeResource valueRange = this.sheetRepository.getValueRange("A:C");
+        ValueRangeResource valueRange = this.googleSheetService.getValueRange(studentSheetsRangeProvider.toString());
 
-        List<Student> students = new ArrayList<>();
-        int index = 0;
-        for (List<String> values : valueRange.getValues()) {
-            int id = ++index;
-            students.add(sheetValueRangeDtoToStudentDtoTransformer.transform(id, values));
-        }
-
-        return students;
+        var values = valueRange.getValues();
+        return IntStream.range(0, values.size())
+                .mapToObj(i -> ValueRangeResourceToStudentTransformer.transform(i+1, values.get(i)))
+                .collect(Collectors.toList());
     }
 
     public Student getStudent(int id) {
-        String range = String.format("A%1$s:C%1$s", id);
-
-        ValueRangeResource valueRange = sheetRepository.getValueRange(range);
+        ValueRangeResource valueRange = googleSheetService.getValueRange(studentSheetsRangeProvider.toString(id));
 
         if (valueRange.getValues() == null || valueRange.getValues()
             .isEmpty()) {
             throw new StudentNotFoundException();
         }
 
-        Student student = sheetValueRangeDtoToStudentDtoTransformer.transform(id, valueRange.getValues()
+        Student student = ValueRangeResourceToStudentTransformer.transform(id, valueRange.getValues()
             .get(0));
         student.setId(id);
 
@@ -58,8 +49,7 @@ public class StudentService {
 
     public Student updateStudent(int id, StudentDto input) {
         var resource = new ValueRangeResource();
-        String range = String.format("A%1$s:C%1$s", id);
-        resource.setRange(range);
+        resource.setRange(studentSheetsRangeProvider.toString(id));
 
         List<List<String>> data = new ArrayList<>();
         data.add(Arrays.stream(new String[]{input.getFirstName(), input.getMiddleName(), input.getLastName()})
@@ -70,7 +60,7 @@ public class StudentService {
             .data(List.of(resource))
             .build();
 
-        sheetRepository.updateValueRange(valueRange);
+        googleSheetService.updateValueRange(valueRange);
 
         return getStudent(id);
     }
@@ -82,8 +72,7 @@ public class StudentService {
 
     public void deleteStudent(int id) {
         var resource = new ValueRangeResource();
-        String range = String.format("A%1$s:C%1$s", id);
-        resource.setRange(range);
+        resource.setRange(studentSheetsRangeProvider.toString(id));
 
         List<List<String>> data = new ArrayList<>();
         resource.setValues(data);
@@ -95,7 +84,7 @@ public class StudentService {
             .data(List.of(resource))
             .build();
 
-        sheetRepository.updateValueRange(dto);
+        googleSheetService.updateValueRange(dto);
     }
 
     private int getNextStudentId() {
@@ -105,19 +94,12 @@ public class StudentService {
             return 1;
         }
 
-        int currentPosition = 1;
-        for (Student value : values) {
-            if (Optional.ofNullable(value.getFirstName())
-                .isEmpty()
-                    && Optional.ofNullable(value.getMiddleName())
-                        .isEmpty()
-                    && Optional.ofNullable(value.getLastName())
-                        .isEmpty()) {
-                return currentPosition;
-            }
-            ++currentPosition;
-        }
+        Optional<Student> currentStudent = values.stream().filter(
+                (Student s) -> Objects.isNull(s.getFirstName()) && Objects.isNull(s.getMiddleName()) && Objects.isNull(s.getLastName())
+        ).findFirst();
 
-        return currentPosition;
+        return currentStudent
+                .map(student -> student.getId() + 1)
+                .orElseGet(() -> values.get(values.size() - 1).getId() + 1);
     }
 }
